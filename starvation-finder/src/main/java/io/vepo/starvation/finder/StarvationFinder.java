@@ -1,13 +1,14 @@
 package io.vepo.starvation.finder;
 
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Function;
-import java.util.stream.Collector;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
@@ -48,22 +49,39 @@ public class StarvationFinder {
 
             loadGroupIdOffsets(adminClient, groupOffset);
             loadProducerPosition(adminClient, groupOffset, partitionPosition);
-            System.out.println("""
-                               ===========================================================================
-                               GROUP ID                 PARTITION                LAG
-                               """);
-            groupOffset.forEach((groupId,
-                                 partitions) -> partitions.forEach((partition,
-                                                                    consumerOffset) -> System.out.println(String.format("%s%s%s%s%s",
-                                                                                                                        limit(groupId),
-                                                                                                                        padding(groupId),
-                                                                                                                        partition.toString(),
-                                                                                                                        padding(partition.toString()),
-                                                                                                                        Long.toString(partitionPosition.getOrDefault(partition,
-                                                                                                                                                                     0L)
-                                                                                                                                - consumerOffset)))));
+            printSummary(groupOffset, partitionPosition);
             Thread.sleep(1_000);
         }
+    }
+
+    private static void printSummary(HashMap<String, Map<TopicPartition, Long>> groupOffset,
+                                     HashMap<TopicPartition, Long> partitionPosition) {
+        System.out.println("""
+                           ===========================================================================
+                           GROUP ID                 PARTITION                LAG
+                           """);
+        var groupIdLags = new HashMap<String, List<Long>>();
+        groupOffset.forEach((groupId,
+                             partitions) -> partitions.forEach((partition,
+                                                                consumerOffset) -> {
+                                 var lag = partitionPosition.getOrDefault(partition, 0L) - consumerOffset;
+                                 groupIdLags.computeIfAbsent(groupId, __ -> new ArrayList<>()).add(lag);
+                                 System.out.println(String.format("%s%s%s%s%s",
+                                                                  limit(groupId),
+                                                                  padding(groupId),
+                                                                  partition.toString(),
+                                                                  padding(partition.toString()),
+                                                                  Long.toString(lag)));
+                             }));
+        groupIdLags.forEach((groupId, lags) -> System.out.println(String.format("%s%s%s%s%s",
+                                                                                limit(groupId),
+                                                                                padding(groupId),
+                                                                                "AVERAGE",
+                                                                                padding("AVERAGE"),
+                                                                                Double.toString(lags.stream()
+                                                                                                    .mapToLong(i -> i)
+                                                                                                    .average()
+                                                                                                    .orElse(0.0)))));
     }
 
     private static void loadProducerPosition(AdminClient adminClient,
